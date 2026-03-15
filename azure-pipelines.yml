@@ -1,9 +1,114 @@
 trigger:
-- main
+  branches:
+    include:
+    - main
+    - master
+    - develop
 
-pool:
-  vmImage: ubuntu-latest
+pr:
+  branches:
+    include:
+    - main
+    - master
+    - develop
 
-steps:
-- script: echo Hello, world!
-  displayName: 'Run Hello World'
+variables:
+  vmImageName: 'ubuntu-latest'
+  nodeVersion: '20.x'
+  workingDirectory: 'devops-blog'
+  npmCacheDir: '$(Pipeline.Workspace)/.npm'
+  artifactName: 'nextjs-standalone'
+  azureServiceConnection: 'AZURE_SERVICE_CONNECTION'
+  webAppName: 'devops-blog-app'
+
+stages:
+- stage: Build
+  displayName: 'Build Next.js artifact'
+  jobs:
+  - job: Build
+    displayName: 'Install and package app'
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - checkout: self
+      clean: 'true'
+
+    - task: NodeTool@0
+      displayName: 'Use Node.js $(nodeVersion)'
+      inputs:
+        versionSpec: '$(nodeVersion)'
+
+    - task: Cache@2
+      displayName: 'Restore npm cache'
+      inputs:
+        key: 'npm | "$(Agent.OS)" | $(workingDirectory)/package-lock.json'
+        restoreKeys: |
+          npm | "$(Agent.OS)"
+        path: '$(npmCacheDir)'
+
+    - script: npm ci --cache "$(npmCacheDir)" --prefer-offline
+      displayName: 'Install dependencies'
+      workingDirectory: '$(workingDirectory)'
+
+    - script: npm run build
+      displayName: 'Build Next.js app'
+      workingDirectory: '$(workingDirectory)'
+      env:
+        NEXT_TELEMETRY_DISABLED: '1'
+
+    - script: |
+        set -eux
+        PACKAGE_DIR="$(Build.ArtifactStagingDirectory)/package"
+        mkdir -p "$PACKAGE_DIR/.next"
+        cp -R .next/standalone/* "$PACKAGE_DIR/"
+        cp -R .next/static "$PACKAGE_DIR/.next/static"
+        if [ -d public ]; then
+          cp -R public "$PACKAGE_DIR/public"
+        fi
+        test -f "$PACKAGE_DIR/server.js"
+      displayName: 'Assemble standalone deployment package'
+      workingDirectory: '$(workingDirectory)'
+
+    - task: ArchiveFiles@2
+      displayName: 'Archive deployment package'
+      inputs:
+        rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/package'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: '$(Build.ArtifactStagingDirectory)/$(artifactName).zip'
+        replaceExistingArchive: true
+
+    - publish: '$(Build.ArtifactStagingDirectory)/$(artifactName).zip'
+      displayName: 'Publish deployment artifact'
+      artifact: '$(artifactName)'
+
+- stage: Deploy
+  displayName: 'Deploy to Azure App Service'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: Deploy
+    displayName: 'Deploy web app'
+    environment: 'production'
+    pool:
+      vmImage: $(vmImageName)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: '$(artifactName)'
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy to Azure Web App'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              appType: 'webAppLinux'
+              appName: '$(webAppName)'
+              package: '$(Pipeline.Workspace)/$(artifactName)/$(artifactName).zip'
+              runtimeStack: 'NODE|20-lts'
+              startUpCommand: 'node server.js'
+              appSettings: |
+                -WEBSITE_RUN_FROM_PACKAGE 1
+                -SCM_DO_BUILD_DURING_DEPLOYMENT false
+                -NODE_ENV production
