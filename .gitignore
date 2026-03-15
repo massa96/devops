@@ -1,0 +1,5 @@
+devops-blog/node_modules/
+devops-blog/.next/
+devops-blog/out/
+devops-blog/.vercel/
+*.log
