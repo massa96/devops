@@ -20,7 +20,7 @@ variables:
   artifactName: 'nextjs-standalone'
   enableDeploy: 'true'
   webAppName: 'devops-blog-sp'
-  resourceGroupName: 'massakoivogui21'
+  resourceGroupName: 'ziama'
 
 stages:
 - stage: Build
