@@ -19,7 +19,7 @@ variables:
   npmCacheDir: '$(Pipeline.Workspace)/.npm'
   artifactName: 'nextjs-standalone'
   enableDeploy: 'true'
-  webAppName: 'devops-blog-app'
+  webAppName: 'devops-blog-sp'
   resourceGroupName: 'massakoivogui21'
 
 stages:
