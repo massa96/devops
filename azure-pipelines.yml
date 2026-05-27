@@ -1,20 +1,20 @@
 trigger:
   branches:
     include:
-    - main
-    - master
-    - develop
+      - main
+      - master
+      - develop
 
 pr:
   branches:
     include:
-    - main
-    - master
-    - develop
+      - main
+      - master
+      - develop
 
 variables:
   vmImageName: 'ubuntu-latest'
-  nodeVersion: '20.x'
+  nodeVersion: '22.x'
   workingDirectory: 'devops-blog'
   npmCacheDir: '$(Pipeline.Workspace)/.npm'
   artifactName: 'nextjs-standalone'
@@ -27,20 +27,17 @@ stages:
   displayName: 'Build Next.js artifact'
   jobs:
   - job: Build
-    displayName: 'Install and package app'
     pool:
       vmImage: $(vmImageName)
     steps:
     - checkout: self
-      clean: 'true'
+      clean: true
 
     - task: NodeTool@0
-      displayName: 'Use Node.js $(nodeVersion)'
       inputs:
         versionSpec: '$(nodeVersion)'
 
     - task: Cache@2
-      displayName: 'Restore npm cache'
       inputs:
         key: 'npm | "$(Agent.OS)" | $(workingDirectory)/package-lock.json'
         restoreKeys: |
@@ -48,11 +45,9 @@ stages:
         path: '$(npmCacheDir)'
 
     - script: npm ci --cache "$(npmCacheDir)" --prefer-offline
-      displayName: 'Install dependencies'
       workingDirectory: '$(workingDirectory)'
 
     - script: npm run build
-      displayName: 'Build Next.js app'
       workingDirectory: '$(workingDirectory)'
       env:
         NEXT_TELEMETRY_DISABLED: '1'
@@ -62,25 +57,17 @@ stages:
         PACKAGE_DIR="$(Build.ArtifactStagingDirectory)/package"
         mkdir -p "$PACKAGE_DIR/.next"
 
-        # Copie le standalone (en conservant le chemin standard attendu)
         cp -R .next/standalone "$PACKAGE_DIR/.next/standalone"
-
-        # Copie les assets statiques
         cp -R .next/static "$PACKAGE_DIR/.next/static"
 
-        # Copie le public si présent
         if [ -d public ]; then
           cp -R public "$PACKAGE_DIR/public"
         fi
 
-        # Vérifications
         test -f "$PACKAGE_DIR/.next/standalone/server.js"
-        test -d "$PACKAGE_DIR/.next/static"
-      displayName: 'Assemble standalone deployment package'
       workingDirectory: '$(workingDirectory)'
 
     - task: ArchiveFiles@2
-      displayName: 'Archive deployment package'
       inputs:
         rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/package'
         includeRootFolder: false
@@ -89,16 +76,13 @@ stages:
         replaceExistingArchive: true
 
     - publish: '$(Build.ArtifactStagingDirectory)/$(artifactName).zip'
-      displayName: 'Publish deployment artifact'
       artifact: '$(artifactName)'
 
 - stage: Deploy
-  displayName: 'Deploy to Azure App Service'
   dependsOn: Build
   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['enableDeploy'], 'true'))
   jobs:
   - job: Deploy
-    displayName: 'Deploy web app'
     pool:
       vmImage: $(vmImageName)
     steps:
@@ -107,37 +91,30 @@ stages:
 
     - script: |
         set -eux
-        test -n "$AZURE_CLIENT_ID"
-        test -n "$AZURE_CLIENT_SECRET"
-        test -n "$AZURE_TENANT_ID"
-        test -n "$AZURE_SUBSCRIPTION_ID"
-        test -n "$(resourceGroupName)"
-        test -n "$(webAppName)"
-    
+
         az login --service-principal \
           --username "$AZURE_CLIENT_ID" \
           --password "$AZURE_CLIENT_SECRET" \
           --tenant "$AZURE_TENANT_ID"
-    
+
         az account set --subscription "$AZURE_SUBSCRIPTION_ID"
-    
+
         az webapp config appsettings set \
           --resource-group "$(resourceGroupName)" \
           --name "$(webAppName)" \
-          --settings WEBSITE_RUN_FROM_PACKAGE=1 SCM_DO_BUILD_DURING_DEPLOYMENT=false NODE_ENV=production
-    
+          --settings WEBSITE_RUN_FROM_PACKAGE=1 NODE_ENV=production
+
         az webapp config set \
           --resource-group "$(resourceGroupName)" \
           --name "$(webAppName)" \
           --linux-fx-version "NODE|22-lts" \
-          --startup-file ".next/standalone/server.js"
-    
+          --startup-file "node .next/standalone/server.js"
+
         az webapp deploy \
           --resource-group "$(resourceGroupName)" \
           --name "$(webAppName)" \
           --src-path "$(Pipeline.Workspace)/$(artifactName)/$(artifactName).zip" \
           --type zip
-      displayName: 'Deploy with Azure CLI'
       env:
         AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)
         AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)
